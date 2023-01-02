@@ -34,7 +34,7 @@ BufferedFileReader::BufferedFileReader(File* apFileHandle)
 
   if(nullptr != mpFileBuffer)
   {
-    mDataBytes = (int8_t*)(mpFileBuffer->maData);
+    mDataBytes = (uint8_t*)(mpFileBuffer->maData);
   }
   else
   {

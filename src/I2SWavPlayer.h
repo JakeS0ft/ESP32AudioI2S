@@ -25,7 +25,9 @@
 
 #include "Arduino.h"
 #include "ISDWavFile.h"
-
+#if defined(ESP32)
+	#include <driver/i2s.h>
+#endif
 //I2S buffer size
 #define I2S_BUF_SIZE 512
 
@@ -33,11 +35,19 @@
 #define MAX_WAV_FILES 5
 
 //Default Pins
-#define PIN_I2S_MCK_DEFAULT 13
-#define PIN_I2S_BCLK_DEFAULT (A2)
-#define PIN_I2S_LRCK_DEFAULT (A3)
-#define PIN_I2S_DIN_DEFAULT 18
-#define PIN_I2S_SD_DEFAULT  10
+#if defined(NRF52) || defined(NRF52_SERIES)
+	#define PIN_I2S_MCK_DEFAULT 13
+	#define PIN_I2S_BCLK_DEFAULT (A2)
+	#define PIN_I2S_LRCK_DEFAULT (A3)
+	#define PIN_I2S_DIN_DEFAULT 18
+	#define PIN_I2S_SD_DEFAULT  10
+#elif defined(ESP32)
+	#define PIN_I2S_MCK_DEFAULT 100 // dummy definition, not needed for ESP32 platform
+	#define PIN_I2S_BCLK_DEFAULT 27
+	#define PIN_I2S_LRCK_DEFAULT 26
+	#define PIN_I2S_DIN_DEFAULT 25
+	#define PIN_I2S_SD_DEFAULT  101 // dummy definition, todo: to be defined later
+#endif
 
 enum ESampleRate
 {
@@ -144,12 +154,20 @@ public:
 		switch (aSampleRate)
 		{
 		case ee2205: //LRCLK at 44.1kHz (for playback speed of 22.05kHz)
-			NRF_I2S->CONFIG.MCKFREQ =  I2S_CONFIG_MCKFREQ_MCKFREQ_32MDIV11 << I2S_CONFIG_MCKFREQ_MCKFREQ_Pos;
-			NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_128X << I2S_CONFIG_RATIO_RATIO_Pos;
-			break;
+			#if defined(NRF52) || defined(NRF52_SERIES)
+				NRF_I2S->CONFIG.MCKFREQ =  I2S_CONFIG_MCKFREQ_MCKFREQ_32MDIV11 << I2S_CONFIG_MCKFREQ_MCKFREQ_Pos;
+				NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_128X << I2S_CONFIG_RATIO_RATIO_Pos;
+			#elif defined(ESP32)
+				m_i2s_config.sample_rate						= 22050;
+			#endif
+				break;
 		case ee4410: //LRCLK at 88.1kHz (for playback speed of 44.1kHz)
-			NRF_I2S->CONFIG.MCKFREQ =  I2S_CONFIG_MCKFREQ_MCKFREQ_32MDIV11 << I2S_CONFIG_MCKFREQ_MCKFREQ_Pos;
-			NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_64X << I2S_CONFIG_RATIO_RATIO_Pos;
+			#if defined(NRF52) || defined(NRF52_SERIES)
+				NRF_I2S->CONFIG.MCKFREQ =  I2S_CONFIG_MCKFREQ_MCKFREQ_32MDIV11 << I2S_CONFIG_MCKFREQ_MCKFREQ_Pos;
+				NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_64X << I2S_CONFIG_RATIO_RATIO_Pos;
+			#elif defined(ESP32)
+				m_i2s_config.sample_rate						= 44100;
+			#endif
 			break;
 		default:
 			Configure_I2S_Speed(ee2205);
@@ -199,8 +217,13 @@ public:
 	 *
 	 */
 	int8_t GetAudioSampleValue();
+#if defined(ESP32)
+private:
+    enum : int { APLL_AUTO = -1, APLL_ENABLE = 1, APLL_DISABLE = 0 };
 
-
+    i2s_config_t          m_i2s_config = {}; // stores values for I2S driver
+    i2s_pin_config_t      m_pin_config = {};
+#endif
 
 protected:
 

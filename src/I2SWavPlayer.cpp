@@ -23,6 +23,7 @@
 #include "Arduino.h"
 #include "I2SWavPlayer.h"
 
+
 I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
                            int32_t aPinBCLK,
                            int32_t aPinLRCK,
@@ -38,6 +39,19 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
    mPinLRCK = aPinLRCK;
    mPinDIN = aPinDIN;
    mPinSD = aPinSD;
+
+#if defined(ESP32)
+   m_pin_config.bck_io_num   = mPinBCLK;
+   m_pin_config.ws_io_num    = mPinLRCK; //  wclk
+   m_pin_config.data_out_num = mPinDIN;
+   m_pin_config.data_in_num  = mPinDIN;
+#if(ESP_IDF_VERSION_MAJOR >= 4 && ESP_IDF_VERSION_MINOR >= 4)
+   m_pin_config.mck_io_num   = mPinMCK;
+#endif
+   // hard-wire the 1st (0) I2S port of the ESP32
+   const esp_err_t result = i2s_set_pin((i2s_port_t) I2S_NUM_0, &m_pin_config);
+
+#endif
 
    for(int lIdx = 0; lIdx < MAX_WAV_FILES; lIdx++)
    {
@@ -124,6 +138,7 @@ void I2SWavPlayer::StartPlayback()
 
    mBufferASelected = true;
 
+#if defined(NRF52) || defined(NRF52_SERIES)
    NRF_I2S->RXTXD.MAXCNT = I2S_BUF_SIZE;
    NRF_I2S->TXD.PTR = (uint32_t) maBufferA;
    NRF_I2S->EVENTS_TXPTRUPD = 0;
@@ -131,17 +146,29 @@ void I2SWavPlayer::StartPlayback()
    // restart the MCK generator (a TASKS_STOP will disable the MCK generator)
    // Start transmitting I2S data
    NRF_I2S->TASKS_START = 1;
+#elif defined(ESP32)
+   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maBufferA, sizeof(uint32_t), 0, 100);
+   if(err != ESP_OK) {
+       log_e("ESP32 Errorcode %i", err);
+       //return false;
+   }
+#endif
 }
 
 void I2SWavPlayer::StopPlayback()
 {
    // Stop transmitting I2S data, a TASKS_STOP will disable the MCK generator
+#if defined(NRF52) || defined(NRF52_SERIES)
    NRF_I2S->TASKS_STOP = 1;
+#elif defined(ESP32)
+
+#endif
 }
 
 bool I2SWavPlayer::ContinuePlayback()
 {
    bool lPlaybackIsDone = false;
+#if defined(NRF52) || defined(NRF52_SERIES)
 
    if (NRF_I2S->EVENTS_TXPTRUPD != 0) //It's time to update a buffer
    {
@@ -163,6 +190,9 @@ bool I2SWavPlayer::ContinuePlayback()
       //Toggle buffer selector
       mBufferASelected = !mBufferASelected;
    }
+#elif defined(ESP32)
+
+#endif
 
    if(0 == mSamplesMixed)
    {
@@ -509,12 +539,34 @@ void I2SWavPlayer::Configure_I2S()
 
    // Position variables (_Pos) are defined in nrf52_bitfields.h
 
+#if defined(NRF52) || defined(NRF52_SERIES)
    // Enable Tx transmission
    NRF_I2S->CONFIG.TXEN = (I2S_CONFIG_TXEN_TXEN_ENABLE << I2S_CONFIG_TXEN_TXEN_Pos);
 
    // Enable MCK generator
    NRF_I2S->CONFIG.MCKEN = (I2S_CONFIG_MCKEN_MCKEN_ENABLE << I2S_CONFIG_MCKEN_MCKEN_Pos);
+#elif defined(ESP32)
+   // configure the ESP32's I2S interface
+   m_i2s_config.bits_per_sample					= I2S_BITS_PER_SAMPLE_16BIT;
+   m_i2s_config.channel_format					= I2S_CHANNEL_FMT_RIGHT_LEFT;
+   m_i2s_config.dma_buf_count					= 16;
+   m_i2s_config.dma_buf_len						= 516;
+   m_i2s_config.fixed_mclk						= I2S_PIN_NO_CHANGE;
+   m_i2s_config.intr_alloc_flags				= ESP_INTR_FLAG_LEVEL1; // interrupt priority
+   m_i2s_config.sample_rate						= 16000;
+   m_i2s_config.tx_desc_auto_clear				= true;   // new in V1.0.1
+   m_i2s_config.use_apll						= APLL_DISABLE;
+   m_i2s_config.mode             = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
+    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // Arduino vers. > 2.0.0
+#else
+    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
+#endif
 
+
+   i2s_driver_uninstall((i2s_port_t)I2S_NUM_0);
+   i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 0, NULL);
+#endif
    //	// set the sample rate to a value supported by the audio amp
    //	// LRCLK  ONLY  supports  8kHz,  16kHz,  32kHz,  44.1kHz,  48kHz, 88.2kHz, and 96kHz frequencies.
    //	// LRCLK clocks at  11.025kHz,  12kHz,  22.05kHz  and  24kHz  are  NOT supported.
@@ -531,7 +583,7 @@ void I2SWavPlayer::Configure_I2S()
    //	NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_32X << I2S_CONFIG_RATIO_RATIO_Pos;
 
    Configure_I2S_Speed(ee2205); //Default I2S speed
-
+#if defined(NRF52) || defined(NRF52_SERIES)
    // 16/24/32-bit  resolution, the MAX98357A supports I2S timing only!
    // Master mode, 16Bit, left aligned
    NRF_I2S->CONFIG.MODE = I2S_CONFIG_MODE_MODE_MASTER << I2S_CONFIG_MODE_MODE_Pos;
@@ -558,7 +610,9 @@ void I2SWavPlayer::Configure_I2S()
 
    // Enable the I2S module using the ENABLE register
    NRF_I2S->ENABLE = 1;
+#elif defined(ESP32)
 
+#endif
    pinMode (mPinSD, OUTPUT);
    digitalWrite (mPinSD, HIGH);
 }

@@ -155,7 +155,7 @@ public:
 	 * array of raw bytes of size DATA_BLOCK_SIZE. This method should be used
 	 * sparingly to directly manipulate the buffered data.
 	 */
-	inline int8_t* GetDataBuffer()
+	inline uint8_t* GetDataBuffer()
 	{
 		return mDataBytes;
 	}
@@ -186,7 +186,7 @@ protected:
 
 	//Buffered data bytes
 	//int8_t mDataBytes[DATA_BLOCK_SIZE];
-	int8_t* mDataBytes;
+	uint8_t* mDataBytes;
 
 	//Data buffer read position
 	int mDataBufferPos;
