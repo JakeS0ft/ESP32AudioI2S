@@ -223,6 +223,7 @@ private:
 
     i2s_config_t          m_i2s_config = {}; // stores values for I2S driver
     i2s_pin_config_t      m_pin_config = {};
+    esp_err_t			  m_i2s_returncode = 0;
 #endif
 
 protected:
@@ -277,10 +278,15 @@ protected:
 	int32_t mPinSD;
 
 	//I2S sample buffers
+#if defined(NRF52) || defined(NRF52_SERIES)
 	int32_t maBufferA[I2S_BUF_SIZE] = {};
 	int32_t maBufferB[I2S_BUF_SIZE] = {};
 	int32_t maMixedI2SSamples[I2S_BUF_SIZE] = {};
-
+#elif defined(ESP32)
+	int32_t maBufferA[I2S_BUF_SIZE] = {};
+	int32_t maBufferB[I2S_BUF_SIZE] = {};
+	int32_t maMixedI2SSamples[I2S_BUF_SIZE] = {};
+#endif
 	//Keep track of if buffer A or B is selected
 	bool mBufferASelected;
 

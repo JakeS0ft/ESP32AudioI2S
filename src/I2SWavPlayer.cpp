@@ -20,6 +20,14 @@
  *      Author: JakeSoft
  */
 
+
+ /* USeful Links
+  * ESP32 I2S manual: 			 https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/i2s.html
+  * ESP32 I2S api documentation: https://docs.espressif.com/projects/esp-idf/en/v4.2.3/esp32/api-reference/peripherals/i2s.html
+  *
+  *
+  *
+  */
 #include "Arduino.h"
 #include "I2SWavPlayer.h"
 
@@ -44,7 +52,7 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
    m_pin_config.bck_io_num   = mPinBCLK;
    m_pin_config.ws_io_num    = mPinLRCK; //  wclk
    m_pin_config.data_out_num = mPinDIN;
-   m_pin_config.data_in_num  = mPinDIN;
+   m_pin_config.data_in_num  = I2S_PIN_NO_CHANGE;  //not used
 #if(ESP_IDF_VERSION_MAJOR >= 4 && ESP_IDF_VERSION_MINOR >= 4)
    m_pin_config.mck_io_num   = mPinMCK;
 #endif
@@ -147,11 +155,11 @@ void I2SWavPlayer::StartPlayback()
    // Start transmitting I2S data
    NRF_I2S->TASKS_START = 1;
 #elif defined(ESP32)
-   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maBufferA, sizeof(uint32_t), 0, 100);
-   if(err != ESP_OK) {
-       log_e("ESP32 Errorcode %i", err);
-       //return false;
-   }
+   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maBufferA[0], sizeof(maBufferA)*4, 0, 100);
+   //if(err != ESP_OK) {
+   //    log_e("ESP32 Errorcode %i", err);
+   //    //return false;
+   //}
 #endif
 }
 
@@ -161,7 +169,7 @@ void I2SWavPlayer::StopPlayback()
 #if defined(NRF52) || defined(NRF52_SERIES)
    NRF_I2S->TASKS_STOP = 1;
 #elif defined(ESP32)
-
+   i2s_stop((i2s_port_t)I2S_NUM_0);
 #endif
 }
 
@@ -191,7 +199,8 @@ bool I2SWavPlayer::ContinuePlayback()
       mBufferASelected = !mBufferASelected;
    }
 #elif defined(ESP32)
-
+   // restart I2S driver after a stop event todo: find out if really needed
+   //i2s_start((i2s_port_t)I2S_NUM_0);
 #endif
 
    if(0 == mSamplesMixed)
@@ -545,28 +554,9 @@ void I2SWavPlayer::Configure_I2S()
 
    // Enable MCK generator
    NRF_I2S->CONFIG.MCKEN = (I2S_CONFIG_MCKEN_MCKEN_ENABLE << I2S_CONFIG_MCKEN_MCKEN_Pos);
-#elif defined(ESP32)
-   // configure the ESP32's I2S interface
-   m_i2s_config.bits_per_sample					= I2S_BITS_PER_SAMPLE_16BIT;
-   m_i2s_config.channel_format					= I2S_CHANNEL_FMT_RIGHT_LEFT;
-   m_i2s_config.dma_buf_count					= 16;
-   m_i2s_config.dma_buf_len						= 516;
-   m_i2s_config.fixed_mclk						= I2S_PIN_NO_CHANGE;
-   m_i2s_config.intr_alloc_flags				= ESP_INTR_FLAG_LEVEL1; // interrupt priority
-   m_i2s_config.sample_rate						= 16000;
-   m_i2s_config.tx_desc_auto_clear				= true;   // new in V1.0.1
-   m_i2s_config.use_apll						= APLL_DISABLE;
-   m_i2s_config.mode             = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
-#if ESP_ARDUINO_VERSION_MAJOR >= 2
-    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // Arduino vers. > 2.0.0
-#else
-    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
-#endif
-
-
-   i2s_driver_uninstall((i2s_port_t)I2S_NUM_0);
-   i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 0, NULL);
-#endif
+   // 16/24/32-bit  resolution, the MAX98357A supports I2S timing only!
+   // Master mode, 16Bit, left aligned
+   NRF_I2S->CONFIG.MODE = I2S_CONFIG_MODE_MODE_MASTER << I2S_CONFIG_MODE_MODE_Pos;
    //	// set the sample rate to a value supported by the audio amp
    //	// LRCLK  ONLY  supports  8kHz,  16kHz,  32kHz,  44.1kHz,  48kHz, 88.2kHz, and 96kHz frequencies.
    //	// LRCLK clocks at  11.025kHz,  12kHz,  22.05kHz  and  24kHz  are  NOT supported.
@@ -581,13 +571,6 @@ void I2SWavPlayer::Configure_I2S()
    //	// set 16kHz as default value -> Ration = 256 (4MHz/256=16kHz)
    //	//+++NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_128X << I2S_CONFIG_RATIO_RATIO_Pos;
    //	NRF_I2S->CONFIG.RATIO = I2S_CONFIG_RATIO_RATIO_32X << I2S_CONFIG_RATIO_RATIO_Pos;
-
-   Configure_I2S_Speed(ee2205); //Default I2S speed
-#if defined(NRF52) || defined(NRF52_SERIES)
-   // 16/24/32-bit  resolution, the MAX98357A supports I2S timing only!
-   // Master mode, 16Bit, left aligned
-   NRF_I2S->CONFIG.MODE = I2S_CONFIG_MODE_MODE_MASTER << I2S_CONFIG_MODE_MODE_Pos;
-
    // look for /* Register: I2S_CONFIG_SWIDTH */ in nrf52_bitfields.h
    // 16 bit
    NRF_I2S->CONFIG.SWIDTH = I2S_CONFIG_SWIDTH_SWIDTH_16BIT << I2S_CONFIG_SWIDTH_SWIDTH_Pos;
@@ -611,8 +594,36 @@ void I2SWavPlayer::Configure_I2S()
    // Enable the I2S module using the ENABLE register
    NRF_I2S->ENABLE = 1;
 #elif defined(ESP32)
-
+   // configure the ESP32's I2S interface
+   m_i2s_config.bits_per_sample					= I2S_BITS_PER_SAMPLE_16BIT;
+   m_i2s_config.channel_format					= I2S_CHANNEL_FMT_RIGHT_LEFT;
+   m_i2s_config.dma_buf_count					= 2;
+   m_i2s_config.dma_buf_len						= I2S_BUF_SIZE; // 2x 516 bytes = 1kbyte buffer space
+   m_i2s_config.fixed_mclk						= I2S_PIN_NO_CHANGE;
+   m_i2s_config.intr_alloc_flags				= ESP_INTR_FLAG_LEVEL1; // interrupt priority
+   m_i2s_config.sample_rate						= 16000;
+   m_i2s_config.tx_desc_auto_clear				= true;   // new in V1.0.1
+   m_i2s_config.use_apll						= APLL_DISABLE;
+   m_i2s_config.mode             				= (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+#if ESP_ARDUINO_VERSION_MAJOR >= 2
+    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // Arduino vers. > 2.0.0
+#else
+    // standard I2S format (i.e. not left-justified) means data transmission starts one BCLK cycle after LRCLK transition
+    // MAX98357A needs I2S format and MSB first
+    m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
 #endif
+
+
+    m_i2s_returncode = i2s_driver_uninstall((i2s_port_t)I2S_NUM_0);
+    log_d("I2S return code driver uninstall: %d", m_i2s_returncode);
+   // i2s_driver_install will automatically start the I2S driver
+    m_i2s_returncode = i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 0, NULL);
+    log_d("I2S return code driver install: %d", m_i2s_returncode);
+#endif
+
+
+   Configure_I2S_Speed(ee2205); //Default I2S speed
+
    pinMode (mPinSD, OUTPUT);
    digitalWrite (mPinSD, HIGH);
 }
