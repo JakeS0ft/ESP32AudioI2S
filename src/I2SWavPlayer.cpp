@@ -38,9 +38,12 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
                            int32_t aPinDIN,
                            int32_t aPinSD)
 {
+//#if defined(NRF52) || defined(NRF52_SERIES)
+// allocate 2 buffers, A and B to alternately fill them with audio data and pass them to the I2S driver
    memset(maBufferA, 0, I2S_BUF_SIZE);
    memset(maBufferB, 0, I2S_BUF_SIZE);
    mBufferASelected = true;
+//#endif
 
    mPinMCK = aPinMCK;
    mPinBCLK = aPinBCLK;
@@ -58,7 +61,15 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
 #endif
    // hard-wire the 1st (0) I2S port of the ESP32
    const esp_err_t result = i2s_set_pin((i2s_port_t) I2S_NUM_0, &m_pin_config);
-
+   /*
+    // initialize the buffer size (default is 5*1600 bytes = 8kbytes allocated in Heap
+	if(!InBuff.isInitialized()) {
+       size_t size = InBuff.init();
+       if (size > 0) {
+           AUDIO_INFO("PSRAM %sfound, inputBufferSize: %u bytes", InBuff.havePSRAM()?"":"not ", size - 1);
+       }
+   }
+   */
 #endif
 
    for(int lIdx = 0; lIdx < MAX_WAV_FILES; lIdx++)
@@ -127,9 +138,15 @@ void  I2SWavPlayer::ClearAllWavFiles()
       mapWavFile[lIdx] = nullptr;
    }
 
+//#if defined(NRF52) || defined(NRF52_SERIES)
    //Flush the I2S buffers so only silence will play
    memset(maBufferA, 0, sizeof(int32_t)*I2S_BUF_SIZE);
    memset(maBufferB, 0, sizeof(int32_t)*I2S_BUF_SIZE);
+   memset(maMixedI2SSamples, 0, sizeof(int32_t)*I2S_BUF_SIZE);
+//#elif defined(ESP32)
+
+//#endif
+
 }
 
 void I2SWavPlayer::StartPlayback()
@@ -145,8 +162,8 @@ void I2SWavPlayer::StartPlayback()
    }
 
    mBufferASelected = true;
-
 #if defined(NRF52) || defined(NRF52_SERIES)
+
    NRF_I2S->RXTXD.MAXCNT = I2S_BUF_SIZE;
    NRF_I2S->TXD.PTR = (uint32_t) maBufferA;
    NRF_I2S->EVENTS_TXPTRUPD = 0;
@@ -155,11 +172,14 @@ void I2SWavPlayer::StartPlayback()
    // Start transmitting I2S data
    NRF_I2S->TASKS_START = 1;
 #elif defined(ESP32)
-   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maBufferA[0], sizeof(maBufferA)*4, 0, 100);
-   //if(err != ESP_OK) {
-   //    log_e("ESP32 Errorcode %i", err);
-   //    //return false;
-   //}
+   i2s_zero_dma_buffer((i2s_port_t)I2S_NUM_0);
+
+   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferA(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+   //esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maMixedI2SSamples[0], sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+	if(err != ESP_OK) {
+       log_e("ESP32 Errorcode %i", err);
+       //return false;
+   }
 #endif
 }
 
@@ -176,32 +196,64 @@ void I2SWavPlayer::StopPlayback()
 bool I2SWavPlayer::ContinuePlayback()
 {
    bool lPlaybackIsDone = false;
-#if defined(NRF52) || defined(NRF52_SERIES)
 
+#if defined(NRF52) || defined(NRF52_SERIES)
    if (NRF_I2S->EVENTS_TXPTRUPD != 0) //It's time to update a buffer
    {
       if (mBufferASelected == true)
       {
-         NRF_I2S->EVENTS_TXPTRUPD = 0; //Start consuming buffer B
-         NRF_I2S->TXD.PTR = (uint32_t)maBufferA;
-         memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+        NRF_I2S->EVENTS_TXPTRUPD = 0; //Start consuming buffer B
+        NRF_I2S->TXD.PTR = (uint32_t)maBufferA;
+
+        memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+
+
       }
       else
       {
-         NRF_I2S->EVENTS_TXPTRUPD = 0; //Start consuming buffer A
-         NRF_I2S->TXD.PTR = (uint32_t)maBufferB;
-         memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+        NRF_I2S->EVENTS_TXPTRUPD = 0; //Start consuming buffer A
+        NRF_I2S->TXD.PTR = (uint32_t)maBufferB;
+
+        }
+        memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+
       }
+#endif
+
+   // todo: how to check if buffer is consumed in ESP32?
+#if defined(ESP32)
+   	   esp_err_t err;
+   	   i2s_event_t lI2SEvent;
+       if (xQueueReceive(this->m_i2sQueue, &lI2SEvent, portMAX_DELAY) == pdPASS)
+       {
+    	   if (lI2SEvent.type == I2S_EVENT_TX_DONE)
+    	   {
+    		   if (mBufferASelected == true)
+			   {
+				 memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferA(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+			   }
+			   else  // start consuming Buffer B
+			   {
+				 memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferB(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+			   }
+				if(err != ESP_OK) {
+					log_e("ESP32 Errorcode %i", err);
+					//return false;
+				}
+    	   }
+       }
+#endif
 
       PopulateMixingBuffer(); //Pre-mix next set of samples
 
+#if defined(NRF52) || defined(NRF52_SERIES)
+
       //Toggle buffer selector
       mBufferASelected = !mBufferASelected;
-   }
-#elif defined(ESP32)
-   // restart I2S driver after a stop event todo: find out if really needed
-   //i2s_start((i2s_port_t)I2S_NUM_0);
 #endif
+
 
    if(0 == mSamplesMixed)
    {
@@ -597,8 +649,9 @@ void I2SWavPlayer::Configure_I2S()
    // configure the ESP32's I2S interface
    m_i2s_config.bits_per_sample					= I2S_BITS_PER_SAMPLE_16BIT;
    m_i2s_config.channel_format					= I2S_CHANNEL_FMT_RIGHT_LEFT;
-   m_i2s_config.dma_buf_count					= 2;
-   m_i2s_config.dma_buf_len						= I2S_BUF_SIZE; // 2x 516 bytes = 1kbyte buffer space
+   // memory (SRAM) allocated to I2S buffer: (bits_per_sample/8)*channels*dma_buf_count*dmu_buf_len
+   m_i2s_config.dma_buf_count					= 2; // between 2 and 128 (see error code 283)
+   m_i2s_config.dma_buf_len						= I2S_BUF_SIZE*2; // number of I2S samples, multiplied by 2 due to 16bit samples stored on 32bit (L/R)
    m_i2s_config.fixed_mclk						= I2S_PIN_NO_CHANGE;
    m_i2s_config.intr_alloc_flags				= ESP_INTR_FLAG_LEVEL1; // interrupt priority
    m_i2s_config.sample_rate						= 16000;

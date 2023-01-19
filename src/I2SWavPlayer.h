@@ -27,26 +27,31 @@
 #include "ISDWavFile.h"
 #if defined(ESP32)
 	#include <driver/i2s.h>
+	#include "Audio.h" // ESP32 audio library from schreibfaul
 #endif
-//I2S buffer size
-#define I2S_BUF_SIZE 512
+
 
 //Maximum concurrent wav files
 #define MAX_WAV_FILES 5
 
-//Default Pins
 #if defined(NRF52) || defined(NRF52_SERIES)
+//I2S buffer size
+#define I2S_BUF_SIZE 512  // for nRF52 number of 32-bit words
+//Default Pins
 	#define PIN_I2S_MCK_DEFAULT 13
 	#define PIN_I2S_BCLK_DEFAULT (A2)
 	#define PIN_I2S_LRCK_DEFAULT (A3)
 	#define PIN_I2S_DIN_DEFAULT 18
 	#define PIN_I2S_SD_DEFAULT  10
 #elif defined(ESP32)
-	#define PIN_I2S_MCK_DEFAULT 100 // dummy definition, not needed for ESP32 platform
+//I2S buffer size
+#define I2S_BUF_SIZE 512  // for ESP32 I2S driver the number of samples
+//Default Pins
+	#define PIN_I2S_MCK_DEFAULT I2S_PIN_NO_CHANGE // dummy definition, not needed for ESP32 platform
 	#define PIN_I2S_BCLK_DEFAULT 27
 	#define PIN_I2S_LRCK_DEFAULT 26
 	#define PIN_I2S_DIN_DEFAULT 25
-	#define PIN_I2S_SD_DEFAULT  101 // dummy definition, todo: to be defined later
+	#define PIN_I2S_SD_DEFAULT  I2S_PIN_NO_CHANGE // dummy definition, todo: to be defined later
 #endif
 
 enum ESampleRate
@@ -71,6 +76,9 @@ enum EMixingMode
  */
 class I2SWavPlayer
 {
+
+	//AudioBuffer InBuff; // instance of input buffer
+
 public:
 	/**
 	 * Constructor.
@@ -202,6 +210,24 @@ public:
 		}
 
 		/**
+			 * Fetch pointer to the Buffer A from the last update cycle.
+			 * Returns: Pointer to base of the mixing buffer
+			 */
+			inline int32_t* GetBufferA()
+			{
+			  return maBufferA;
+			}
+
+		/**
+			 * Fetch pointer to the Buffer B from the last update cycle.
+			 * Returns: Pointer to base of the mixing buffer
+			 */
+			inline int32_t* GetBufferB()
+			{
+			  return maBufferB;
+			}
+
+		/**
 		 * Fetch size of the I2S buffers
 		 * Returns: Size of the internal I2S buffers
 		 */
@@ -224,6 +250,9 @@ private:
     i2s_config_t          m_i2s_config = {}; // stores values for I2S driver
     i2s_pin_config_t      m_pin_config = {};
     esp_err_t			  m_i2s_returncode = 0;
+
+    // i2s writer queue (FreeRTOS Queue functions)
+    QueueHandle_t m_i2sQueue;
 #endif
 
 protected:
