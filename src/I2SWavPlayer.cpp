@@ -38,12 +38,37 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
                            int32_t aPinDIN,
                            int32_t aPinSD)
 {
-//#if defined(NRF52) || defined(NRF52_SERIES)
-// allocate 2 buffers, A and B to alternately fill them with audio data and pass them to the I2S driver
-   memset(maBufferA, 0, I2S_BUF_SIZE);
-   memset(maBufferB, 0, I2S_BUF_SIZE);
+
+	// create sample buffers
+	// for memory allocation refer to: https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/mem_alloc.html
+
+// 2 buffers allocated, A and B to alternately fill them with audio data and pass them to the I2S driver
+	// clear both A and B buffers (fill them with 0 with the memset function)
+	Serial.println("Clear sample buffers.");
+#if defined(NRF52) || defined(NRF52_SERIES)
+   memset(maBufferA, 0, sizeof(int32_t)*I2S_BUF_SIZE);
+   memset(maBufferB, 0, sizeof(int32_t)*I2S_BUF_SIZE);
+#elif defined(ESP32)
+// allocate using calloc (?)
+   maBufferA = (uint8_t*) heap_caps_calloc(I2S_BUF_SIZE, sizeof(int32_t), MALLOC_CAP_DEFAULT|MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA);
+   maBufferB = (uint8_t*) heap_caps_calloc(I2S_BUF_SIZE, sizeof(int32_t), MALLOC_CAP_DEFAULT|MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA);
+
+
+   //size_t lmemallocsize;
+   //lmemallocsize = heap_caps_get_allocated_size(maBufferA);
+   //Serial.print("I2SWavPlayer>buffer A size: ");Serial.println(lmemallocsize);
+   //lmemallocsize = heap_caps_get_allocated_size(maBufferB);
+   //Serial.print("I2SWavPlayer>buffer B size: ");Serial.println(lmemallocsize);
+
+#endif
    mBufferASelected = true;
-//#endif
+   m_i2sQueue=NULL;
+	Serial.println("I2SWavPlayer>>Configure I2S driver in Constructor.");
+
+	// i2s driver has to be configured before i2s_set_pin
+   Configure_I2S();
+
+	Serial.println("I2SWavPlayer>>Set I2S Pins.");
 
    mPinMCK = aPinMCK;
    mPinBCLK = aPinBCLK;
@@ -55,11 +80,12 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
    m_pin_config.bck_io_num   = mPinBCLK;
    m_pin_config.ws_io_num    = mPinLRCK; //  wclk
    m_pin_config.data_out_num = mPinDIN;
-   m_pin_config.data_in_num  = I2S_PIN_NO_CHANGE;  //not used
+   m_pin_config.data_in_num  = mPinDIN;  //not used
 #if(ESP_IDF_VERSION_MAJOR >= 4 && ESP_IDF_VERSION_MINOR >= 4)
    m_pin_config.mck_io_num   = mPinMCK;
 #endif
    // hard-wire the 1st (0) I2S port of the ESP32
+	// i2s driver has to be configured before i2s_set_pin
    const esp_err_t result = i2s_set_pin((i2s_port_t) I2S_NUM_0, &m_pin_config);
    /*
     // initialize the buffer size (default is 5*1600 bytes = 8kbytes allocated in Heap
@@ -71,6 +97,7 @@ I2SWavPlayer::I2SWavPlayer(int32_t aPinMCK,
    }
    */
 #endif
+	Serial.println("I2SWavPlayer>>Clear list of Wav Files.");
 
    for(int lIdx = 0; lIdx < MAX_WAV_FILES; lIdx++)
    {
@@ -151,14 +178,19 @@ void  I2SWavPlayer::ClearAllWavFiles()
 
 void I2SWavPlayer::StartPlayback()
 {
+   size_t bytesWritten = 0;
 
    for(int lIdx = 0; lIdx < I2S_BUF_SIZE; lIdx++)
    {
-      GenerateMixedI2SSample(maBufferA[lIdx]);
+      GenerateMixedI2SSample(maMixedI2SSamples[lIdx]);
+      memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+      if (maBufferA==NULL) { Serial.println("buffer error null"); }
    }
    for(int lIdx = 0; lIdx < I2S_BUF_SIZE; lIdx++)
    {
-      GenerateMixedI2SSample(maBufferB[lIdx]);
+      GenerateMixedI2SSample(maMixedI2SSamples[lIdx]);
+      memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
+      if (maBufferA==NULL) { Serial.println("buffer error null"); }
    }
 
    mBufferASelected = true;
@@ -172,10 +204,14 @@ void I2SWavPlayer::StartPlayback()
    // Start transmitting I2S data
    NRF_I2S->TASKS_START = 1;
 #elif defined(ESP32)
+	//Serial.println("I2SWavPlayer::StartPlayback>>Clear dma buffers.");
+
    i2s_zero_dma_buffer((i2s_port_t)I2S_NUM_0);
 
-   esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferA(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
-   //esp_err_t err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maMixedI2SSamples[0], sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+	//Serial.println("I2SWavPlayer::StartPlayback>>Pass BufferA to i2s driver.");
+	esp_err_t err;
+   err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferA, sizeof(int32_t) * I2S_BUF_SIZE, &bytesWritten, 100);
+   //err = i2s_write((i2s_port_t)I2S_NUM_0, (const char*) &maMixedI2SSamples[0], sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
 	if(err != ESP_OK) {
        log_e("ESP32 Errorcode %i", err);
        //return false;
@@ -196,6 +232,7 @@ void I2SWavPlayer::StopPlayback()
 bool I2SWavPlayer::ContinuePlayback()
 {
    bool lPlaybackIsDone = false;
+   size_t bytesWritten = 0;
 
 #if defined(NRF52) || defined(NRF52_SERIES)
    if (NRF_I2S->EVENTS_TXPTRUPD != 0) //It's time to update a buffer
@@ -220,7 +257,6 @@ bool I2SWavPlayer::ContinuePlayback()
       }
 #endif
 
-   // todo: how to check if buffer is consumed in ESP32?
 #if defined(ESP32)
    	   esp_err_t err;
    	   i2s_event_t lI2SEvent;
@@ -228,20 +264,23 @@ bool I2SWavPlayer::ContinuePlayback()
        {
     	   if (lI2SEvent.type == I2S_EVENT_TX_DONE)
     	   {
+    			//Serial.println("I2SWavPlayer::ContinuePlayback>>dma buffer consumed.");
+
     		   if (mBufferASelected == true)
 			   {
 				 memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
-				 err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferA(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferA, sizeof(int32_t)*I2S_BUF_SIZE, &bytesWritten, 100);
 			   }
-			   else  // start consuming Buffer B
+			   else  // start consuming Buffer B&bytesWritten
 			   {
 				 memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
-				 err = i2s_write((i2s_port_t)I2S_NUM_0, GetBufferB(), sizeof(int32_t)*I2S_BUF_SIZE, 0, 100);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferB, sizeof(int32_t)*I2S_BUF_SIZE, &bytesWritten, 100);
 			   }
 				if(err != ESP_OK) {
 					log_e("ESP32 Errorcode %i", err);
 					//return false;
 				}
+				//Serial.print("I2SWavPlayer::ContinuePlayback -> bytes written: "); Serial.println(bytesWritten);
     	   }
        }
 #endif
@@ -670,7 +709,8 @@ void I2SWavPlayer::Configure_I2S()
     m_i2s_returncode = i2s_driver_uninstall((i2s_port_t)I2S_NUM_0);
     log_d("I2S return code driver uninstall: %d", m_i2s_returncode);
    // i2s_driver_install will automatically start the I2S driver
-    m_i2s_returncode = i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 0, NULL);
+    //m_i2s_returncode = i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 0, NULL);
+    m_i2s_returncode = i2s_driver_install  ((i2s_port_t)I2S_NUM_0, &m_i2s_config, 4, &m_i2sQueue);
     log_d("I2S return code driver install: %d", m_i2s_returncode);
 #endif
 

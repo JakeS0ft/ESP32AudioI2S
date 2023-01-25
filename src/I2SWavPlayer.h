@@ -213,18 +213,18 @@ public:
 			 * Fetch pointer to the Buffer A from the last update cycle.
 			 * Returns: Pointer to base of the mixing buffer
 			 */
-			inline int32_t* GetBufferA()
+			inline uint8_t* GetBufferA()
 			{
-			  return maBufferA;
+			  //return maBufferA;
 			}
 
 		/**
 			 * Fetch pointer to the Buffer B from the last update cycle.
 			 * Returns: Pointer to base of the mixing buffer
 			 */
-			inline int32_t* GetBufferB()
+			inline uint8_t* GetBufferB()
 			{
-			  return maBufferB;
+			  //return maBufferB;
 			}
 
 		/**
@@ -312,8 +312,12 @@ protected:
 	int32_t maBufferB[I2S_BUF_SIZE] = {};
 	int32_t maMixedI2SSamples[I2S_BUF_SIZE] = {};
 #elif defined(ESP32)
-	int32_t maBufferA[I2S_BUF_SIZE] = {};
-	int32_t maBufferB[I2S_BUF_SIZE] = {};
+	// static memory allocation
+	//int32_t maBufferA[I2S_BUF_SIZE] = {};
+	//int32_t maBufferB[I2S_BUF_SIZE] = {};
+	// dynamic memory allocation
+	uint8_t* maBufferA           = NULL;
+	uint8_t* maBufferB           = NULL;
 	int32_t maMixedI2SSamples[I2S_BUF_SIZE] = {};
 #endif
 	//Keep track of if buffer A or B is selected
