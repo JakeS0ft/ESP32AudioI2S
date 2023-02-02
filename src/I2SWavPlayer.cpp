@@ -232,7 +232,7 @@ void I2SWavPlayer::StopPlayback()
 bool I2SWavPlayer::ContinuePlayback()
 {
    bool lPlaybackIsDone = false;
-   size_t bytesWritten = 0;
+   size_t t_bytesWritten = 0;
 
 #if defined(NRF52) || defined(NRF52_SERIES)
    if (NRF_I2S->EVENTS_TXPTRUPD != 0) //It's time to update a buffer
@@ -268,30 +268,41 @@ bool I2SWavPlayer::ContinuePlayback()
 
     		   if (mBufferASelected == true)
 			   {
+   				 //Serial.print("I2SWavPlayer::ContinuePlayback -> BufferA[0] "); Serial.println(maBufferA[1] - maBufferA[0]);
 				 memcpy(maBufferA, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
-				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferA, sizeof(int32_t)*I2S_BUF_SIZE, &bytesWritten, 100);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferA, sizeof(int32_t)*I2S_BUF_SIZE, &t_bytesWritten, 100);
 			   }
 			   else  // start consuming Buffer B&bytesWritten
 			   {
+	   			//Serial.print("I2SWavPlayer::ContinuePlayback -> BufferB[0] "); Serial.println(maBufferB[1] - maBufferB[0]);
 				 memcpy(maBufferB, maMixedI2SSamples, sizeof(int32_t)*I2S_BUF_SIZE);
-				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferB, sizeof(int32_t)*I2S_BUF_SIZE, &bytesWritten, 100);
+				 err = i2s_write((i2s_port_t)I2S_NUM_0, maBufferB, sizeof(int32_t)*I2S_BUF_SIZE, &t_bytesWritten, 100);
 			   }
+    		    if (t_bytesWritten < sizeof(int32_t)*I2S_BUF_SIZE) {
+    		    	Serial.print("I2SWavPlayer::ContinuePlayback -> bytes written: "); Serial.println(t_bytesWritten);
+    		    }
 				if(err != ESP_OK) {
 					log_e("ESP32 Errorcode %i", err);
 					//return false;
 				}
 				//Serial.print("I2SWavPlayer::ContinuePlayback -> bytes written: "); Serial.println(bytesWritten);
+				Serial.println(lTimeStamp = micros() - lTimeStamp);
+				lTimeStamp = micros();
     	   }
+    	   else{
+    	       	   Serial.println("nothing to do");
+			  }
        }
+
 #endif
 
       PopulateMixingBuffer(); //Pre-mix next set of samples
 
-#if defined(NRF52) || defined(NRF52_SERIES)
+//#if defined(NRF52) || defined(NRF52_SERIES)
 
       //Toggle buffer selector
       mBufferASelected = !mBufferASelected;
-#endif
+//#endif
 
 
    if(0 == mSamplesMixed)

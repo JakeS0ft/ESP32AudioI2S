@@ -27,7 +27,7 @@
 #include "ISDWavFile.h"
 #if defined(ESP32)
 	#include <driver/i2s.h>
-	#include "Audio.h" // ESP32 audio library from schreibfaul
+	//#include "Audio.h" // ESP32 audio library from schreibfaul
 #endif
 
 
@@ -253,6 +253,8 @@ private:
 
     // i2s writer queue (FreeRTOS Queue functions)
     QueueHandle_t m_i2sQueue;
+    long lTimeStamp; // general purpose time stamp variable for time logging
+
 #endif
 
 protected:
