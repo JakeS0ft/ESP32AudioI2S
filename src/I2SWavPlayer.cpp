@@ -260,7 +260,8 @@ bool I2SWavPlayer::ContinuePlayback()
 #if defined(ESP32)
    	   esp_err_t err;
    	   i2s_event_t lI2SEvent;
-       if (xQueueReceive(this->m_i2sQueue, &lI2SEvent, portMAX_DELAY) == pdPASS)
+       if (xQueueReceive(this->m_i2sQueue, &lI2SEvent, 0) == pdPASS)
+     //      if (xQueueReceive(this->m_i2sQueue, &lI2SEvent, portMAX_DELAY) == pdPASS)
        {
     	   if (lI2SEvent.type == I2S_EVENT_TX_DONE)
     	   {
@@ -286,8 +287,6 @@ bool I2SWavPlayer::ContinuePlayback()
 					//return false;
 				}
 				//Serial.print("I2SWavPlayer::ContinuePlayback -> bytes written: "); Serial.println(bytesWritten);
-				Serial.println(lTimeStamp = micros() - lTimeStamp);
-				lTimeStamp = micros();
     	   }
     	   else{
     	       	   Serial.println("nothing to do");

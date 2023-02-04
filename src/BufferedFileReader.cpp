@@ -87,6 +87,7 @@ int BufferedFileReader::FetchBufferedBytes(int8_t* apOutBuffer, int aSize)
 
 void BufferedFileReader::ReadNextDataBlock()
 {
+
   //	Serial.println("Reading data block");
   //Clear out any existing data
   memset(mDataBytes, 0, DATA_BLOCK_SIZE);
